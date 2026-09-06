@@ -1,5 +1,7 @@
 import numpy as np
 
+from sklearn import metrics
+
 from sklearn.decomposition import PCA
 
 from utils.data_utils import time_delay_embed, corr, partial_corr
@@ -541,7 +543,172 @@ class PCM_rep_simplex(CM_rep_simplex):
         ratio_r2=sc2_r2/sc1_r2
 
         return sc1_error, sc2_error, ratio_error, sc1_corr, sc2_corr, ratio_corr, sc1_r2, sc2_r2, ratio_r2
-    
 
+    
+# 3. Cross Mapping Cardinality (CMC)
+class CMC_simplex(CM_simplex):
+    """
+    Cross Mapping Cardinality based on simplex projection.
+    Inherits from CM_simplex to utilize the same data embedding pipeline.
+    """
+    def __init__(self, df, causes, effects, tau=2, emd=8, knn=10, L=3000, method='vanilla', **kwargs):
+        super().__init__(df, causes, effects, tau, emd, knn, L, method, **kwargs)
+        self.model = CMC_rep_simplex(
+            cause_reps=self.M_cause, 
+            effect_reps=self.M_effect, 
+            knn=knn, 
+            L=L, 
+            method=method, 
+            **kwargs
+        )
+
+    def predict_manifolds(self):
+        raise NotImplementedError("CMC calculates mapping cardinality directly.")
+
+    def causality(self):
+        """ Causality score based on Cross Mapping Cardinality """
+        return self.model.causality()
+
+
+# 4. Direct Cross Mapping Cardinality (DCMC)
+class DCMC_simplex(PCM_simplex):
+    """
+    Direct Cross Mapping Cardinality based on partial conditional mappings.
+    """
+    def __init__(self, df, causes, effects, cond, tau=2, emd=8, knn=10, L=3000, method='vanilla', **kwargs):
+        super().__init__(df, causes, effects, cond, tau, emd, knn, L, method, **kwargs)
+        self.model = DCMC_rep_simplex(
+            cause_reps=self.M_cause, 
+            effect_reps=self.M_effect, 
+            cond_reps=self.M_cond,
+            knn=knn, 
+            L=L, 
+            method=method, 
+            **kwargs
+        )
+
+    def predict_manifolds(self):
+        raise NotImplementedError("DCMC calculates mapping cardinality directly.")
+        
+    def causality(self):
+        """ Causality score based on Direct Cross Mapping Cardinality """
+        return self.model.causality()
+
+
+# Utility 3: CMC mapping between representations
+class CMC_rep_simplex(CM_rep_simplex):
+    def __init__(self, cause_reps, effect_reps, knn=10, L=None, method='vanilla', **kwargs):
+        super().__init__(cause_reps, effect_reps, knn, L, method, **kwargs)
+
+    def get_mapping(self, M_x, M_y):
+
+        if self.method == 'PCA':
+            n_comp = self.kwargs.get('pca_dim', M_x.shape[1])
+            pca_x = PCA(n_components=n_comp)
+            pca_y = PCA(n_components=n_comp)
+            M_x_rep = pca_x.fit_transform(M_x)
+            M_y_rep = pca_y.fit_transform(M_y)
+        else:
+            M_x_rep = M_x
+            M_y_rep = M_y
+
+        dists_x = self.get_distance_vanilla(M_x_rep)
+        dists_y = self.get_distance_vanilla(M_y_rep)
+        
+        idx_x = np.argsort(dists_x, axis=1)[:, 1:]
+        idx_y = np.argsort(dists_y, axis=1)[:, 1:]
+        
+        N = idx_x.shape[0]
+        x_nn = idx_x[:, :self.knn]
+        
+        map_x2y = np.zeros_like(x_nn)
+        for i in range(N):
+            for k in range(self.knn):
+                neighbor = x_nn[i, k]
+                rank = np.where(idx_y[i] == neighbor)[0]
+                if len(rank) > 0:
+                    map_x2y[i, k] = rank[0]
+                else:
+                    map_x2y[i, k] = N
+        return map_x2y
+
+    @staticmethod
+    def count_mapping(map_x2y, tgt_neighbor):
+        return len(np.where(map_x2y < tgt_neighbor)[-1])
+
+    def mapping_to_ratio(self, map_x2y):
+        n_row = map_x2y.shape[0]
+        n_ele = map_x2y.size
+        ratios_x2y = np.asarray([self.count_mapping(map_x2y, i) for i in range(n_row)]) / n_ele
+        return ratios_x2y
+
+    @staticmethod
+    def ratio_to_auc(ratios):
+        n_ele = len(ratios)
+        neighbor_ratios = np.arange(n_ele) / (n_ele - 1) if n_ele > 1 else np.array([0.0])
+        auc = metrics.auc(neighbor_ratios, ratios)
+        return auc
+
+    @staticmethod
+    def auc_to_score(auc):
+        auc = max(auc, 0.5)
+        return 2 * (auc - 0.5)
+
+    def ratio_to_score(self, ratios):
+        return self.auc_to_score(self.ratio_to_auc(ratios))
+
+    def causality(self):
+        map_e2c = self.get_mapping(self.M_effect, self.M_cause)
+        score_cause_to_effect = self.ratio_to_score(self.mapping_to_ratio(map_e2c))
+        
+        map_c2e = self.get_mapping(self.M_cause, self.M_effect)
+        score_effect_to_cause = self.ratio_to_score(self.mapping_to_ratio(map_c2e))
+
+        return score_cause_to_effect, score_effect_to_cause
+
+
+# Utility 4: DCMC mapping between representations
+class DCMC_rep_simplex(CMC_rep_simplex):
+    def __init__(self, cause_reps, effect_reps, cond_reps, knn=10, L=None, method='vanilla', **kwargs):
+        super().__init__(cause_reps, effect_reps, knn, L, method, **kwargs)
+        self.M_cond = cond_reps
+        if L is not None:
+            self.M_cond = self.M_cond[:L]
+            
+        assert self.M_cause.shape[0] == self.M_effect.shape[0] == self.M_cond.shape[0], "Time indices must match."
+
+    def ratio_to_dir_ratio(self, ratios_x2y, ratios_z2y, map_x2z, n_neighbor):
+        dir_ratios_x2y = ratios_x2y - self.count_mapping(map_x2z, n_neighbor) / map_x2z.size * ratios_z2y
+        dir_ratios_x2y = np.maximum(dir_ratios_x2y, 0)
+        return dir_ratios_x2y
+
+    def causality(self):
+
+        map_e2c = self.get_mapping(self.M_effect, self.M_cause)
+        ratios_e2c = self.mapping_to_ratio(map_e2c)
+        
+        map_z2c = self.get_mapping(self.M_cond, self.M_cause)
+        ratios_z2c = self.mapping_to_ratio(map_z2c)
+        
+        map_e2z = self.get_mapping(self.M_effect, self.M_cond)
+        
+        dir_ratios_e2c = self.ratio_to_dir_ratio(ratios_e2c, ratios_z2c, map_e2z, self.knn)
+        dir_score_c2e = self.ratio_to_score(dir_ratios_e2c)
+        
+        map_c2e = self.get_mapping(self.M_cause, self.M_effect)
+        ratios_c2e = self.mapping_to_ratio(map_c2e)
+        
+        map_z2e = self.get_mapping(self.M_cond, self.M_effect)
+        ratios_z2e = self.mapping_to_ratio(map_z2e)
+        
+        map_c2z = self.get_mapping(self.M_cause, self.M_cond)
+        
+        dir_ratios_c2e = self.ratio_to_dir_ratio(ratios_c2e, ratios_z2e, map_c2z, self.knn)
+        dir_score_e2c = self.ratio_to_score(dir_ratios_c2e)
+        
+        cmc_score_c2e = self.ratio_to_score(ratios_e2c)
+        cmc_score_e2c = self.ratio_to_score(ratios_c2e)
+
+        return dir_score_c2e, dir_score_e2c, cmc_score_c2e, cmc_score_e2c
 
 

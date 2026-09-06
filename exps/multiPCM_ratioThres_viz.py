@@ -11,14 +11,14 @@ import seaborn as sns
 import argparse
 parser = argparse.ArgumentParser("Process outputs of multiPCM with various thresholds of PCM ratio")
 parser.add_argument('--data_dir', type=str, default='outputs/multiPCM_ratioThres')
-parser.add_argument('--causality_type', type=str, default='both_Cycle', help='Options: direct, indirect, both, both_Cycle, both_noCycle')
+parser.add_argument('--causality_type', type=str, default='3V_direct', help='Options: direct, indirect, both, both_Cycle, both_noCycle')
 
 parser.add_argument('--seed', type=int, default=97, help='if None, average over all seeds; else an int as random seed, for sampling a random start point for input time series')
 
 parser.add_argument('--L', type=int, default=3500, help='length of input time series')
 
 parser.add_argument('--noiseType', type=str, default='gNoise', help='type of noise. Options: gNoise, lpNoise, or None')
-parser.add_argument('--noiseInjectType', type=str, default='add', help='type of noise injection. Options: add, mult, both')
+parser.add_argument('--noiseInjectType', type=str, default='adda', help='type of noise injection. Options: add, mult, both')
 parser.add_argument('--noiseLevel', type=float, default=5e-3, help='noise level')
 
 parser.add_argument('--tau', type=int, default=2, help="Cross mapping tau-lag")
