@@ -18,21 +18,21 @@ parser.add_argument('--causality_type', type=str, default='3V_direct', help='Opt
 
 parser.add_argument('--seed', type=int, default=97, help='random seed, for sampling a random start point for input time series')
 
-parser.add_argument('--L', type=int, default=4000, help='length of input time series')
+parser.add_argument('--L', type=int, default=1000, help='length of input time series')
 
 parser.add_argument('--noiseType', type=str, default='None', help='type of noise. Options: gNoise, lpNoise, or None')
 parser.add_argument('--noiseInjectType', type=str, default='add', help='type of noise injection. Options: add, mult, both')
 parser.add_argument('--noiseLevel', type=float, default=1e-2, help='noise level')
 
 parser.add_argument('--tau', type=int, default=1, help="Cross mapping tau-lag")
-parser.add_argument('--emd', type=int, default=16, help="Cross mapping embedding dimension")
-parser.add_argument('--knn', type=int, default=10, help="Number of nearest neighbors for DCMC")
+parser.add_argument('--emd', type=int, default=3, help="Cross mapping embedding dimension")
+parser.add_argument('--knn', type=int, default=4, help="Number of nearest neighbors for DCMC")
 
-parser.add_argument('--dcmc_thres', type=float, default=0.1, help="Threshold for direct causality score")
+parser.add_argument('--dcmc_thres', type=float, default=0.5, help="Threshold for direct causality score")
 
 # name of cause and effect (each is single variable, the rest are all treated as conditions)
 parser.add_argument('--cause', type=str, default='X')
-parser.add_argument('--effect', type=str, default='Y')
+parser.add_argument('--effect', type=str, default='Z')
 
 args=parser.parse_args()
 
